@@ -1,0 +1,10 @@
+.env
+.venv/
+sessions/
+*.session*
+__pycache__/
+*.egg-info/
+
+data/
+
+.DS_Store
