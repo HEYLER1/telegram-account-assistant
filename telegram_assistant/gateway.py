@@ -49,7 +49,7 @@ TYPES = {
     'antes_de_tema': int, 'antes_de_fecha': str, 'url': str, 'max_mb': int,
     'motor': str, 'modelo': str, 'idioma': str, 'trabajo_id': str, 'formato': str,
     'operacion': str, 'texto': str, 'fecha': str, 'titulo': str, 'chats': list[str],
-    'comprobante': str, 'autorizado': bool,
+    'comprobante': str, 'autorizado': bool, 'categoria': str,
 }
 
 

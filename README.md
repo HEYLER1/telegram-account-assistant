@@ -90,6 +90,31 @@ El servidor ofrece **exactamente una herramienta**, `telegram(accion, parametros
 
 ## Documentos, audios e índice local
 
+### Descargas organizadas y verificadas
+
+`descargar` permite agrupar archivos con `categoria`, por ejemplo `redes-de-datos`.
+Se guardan en `data/downloads/redes-de-datos/`, con un nombre legible derivado
+del archivo original y un sufijo aleatorio para no sobrescribir descargas anteriores.
+La categoría admite de 1 a 64 letras ASCII, números, guiones o guiones bajos;
+no acepta rutas arbitrarias. Si se omite, se utiliza `data/downloads/`.
+
+```sh
+telegram-asistente tool descargar --params '{"chat":"@canal","mensaje_id":123,"categoria":"redes-de-datos","max_mb":25}'
+```
+
+La respuesta incluye `path`, `size_bytes`, `sha256`, `categoria` y los metadatos
+del mensaje de origen. El archivo se publica en su nombre final solo cuando
+su tamaño coincide con el informado por Telegram. Las descargas incompletas o
+interrumpidas por una excepción se eliminan. SHA-256 permite comparar archivos;
+no certifica su seguridad ni autenticidad. Una terminación abrupta del proceso
+puede dejar un archivo temporal `.part`.
+
+Pruebas de regresión añadidas: categorías inseguras rechazadas antes de consultar
+Telegram, nombres originales con rutas, conservación de descargas repetidas,
+huella SHA-256, limpieza de descargas incompletas y rechazo de enlaces simbólicos
+que apuntan fuera del almacenamiento local. Son pruebas automatizadas con un
+cliente simulado; no descargan material real de una cuenta.
+
 `indexar` incorpora explícitamente una página de texto. `extraer_documento` descarga y extrae PDF con texto (hasta 200 páginas), DOCX, TXT, CSV o Markdown y añade el contenido al índice. Extracción limitada a 500000 caracteres por documento. No incluye OCR de imágenes o PDF escaneado.
 
 `transcribir` usa por defecto el motor **telegram**, sujeto a los límites o permisos de tu cuenta. Si devuelve `pending`, repite más tarde. Guarda la transcripción para que `buscar_local` pueda encontrarla. Una transcripción automática no es una cita literal garantizada.

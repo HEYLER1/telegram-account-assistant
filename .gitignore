@@ -8,3 +8,7 @@ __pycache__/
 data/
 
 .DS_Store
+
+# Material personal descargado o creado durante el uso del asistente.
+libros-redes-de-datos/
+rosa-realista/

@@ -209,6 +209,57 @@ class FeatureTests(unittest.IsolatedAsyncioTestCase):
             await self.service.descargar('-100123', 10, max_mb=101)
         self.assertEqual(self.client.calls, [])
 
+    async def test_download_rejects_unsafe_category_before_network(self):
+        from unittest.mock import AsyncMock
+        with patch.object(self.client, 'get_messages', new=AsyncMock()) as get:
+            for category in ['../secrets', '/tmp', '', 'a/b', 'a\\b', 'a' * 65]:
+                with self.assertRaises(ValueError):
+                    await self.service.descargar('7', 10, categoria=category)
+            get.assert_not_awaited()
+
+    async def test_download_names_checksums_and_never_overwrites(self):
+        from unittest.mock import AsyncMock
+        import hashlib
+        message = SimpleNamespace(media=True, file=SimpleNamespace(
+            name='../../Redes.pdf', ext='.pdf', size=8))
+        async def download(message, file):
+            Path(file).write_bytes(b'%PDF-1.7')
+            return file
+        with patch.object(self.client, 'get_messages', new=AsyncMock(return_value=message)), \
+             patch.object(self.client, 'download_media', new=AsyncMock(side_effect=download), create=True), \
+             patch('telegram_assistant.features.message_data', return_value={'id': 10}):
+            first = await self.service.descargar('7', 10, categoria='redes-de-datos')
+            second = await self.service.descargar('7', 10, categoria='redes-de-datos')
+        path = Path(first['path'])
+        self.assertEqual(path.parent, self.store.directory / 'downloads' / 'redes-de-datos')
+        self.assertTrue(path.name.startswith('Redes-'))
+        self.assertEqual(path.suffix, '.pdf')
+        self.assertNotEqual(first['path'], second['path'])
+        self.assertEqual(first['sha256'], hashlib.sha256(b'%PDF-1.7').hexdigest())
+        self.assertEqual(first['size_bytes'], 8)
+        self.assertFalse(list(path.parent.glob('*.part')))
+
+    async def test_incomplete_download_is_removed(self):
+        from unittest.mock import AsyncMock
+        message = SimpleNamespace(media=True, file=SimpleNamespace(name='book.pdf', ext='.pdf', size=99))
+        async def download(message, file):
+            Path(file).write_bytes(b'partial')
+            return file
+        with patch.object(self.client, 'get_messages', new=AsyncMock(return_value=message)), \
+             patch.object(self.client, 'download_media', new=AsyncMock(side_effect=download), create=True):
+            with self.assertRaisesRegex(ValueError, 'incompleta'):
+                await self.service.descargar('7', 10)
+        self.assertEqual(list((self.store.directory / 'downloads').iterdir()), [])
+
+    async def test_download_rejects_symlink_escape(self):
+        from unittest.mock import AsyncMock
+        with TemporaryDirectory() as outside:
+            (self.store.directory / 'downloads').symlink_to(outside, target_is_directory=True)
+            message = SimpleNamespace(media=True, file=SimpleNamespace(name='book.pdf', ext='.pdf', size=8))
+            with patch.object(self.client, 'get_messages', new=AsyncMock(return_value=message)):
+                with self.assertRaisesRegex(ValueError, 'fuera'):
+                    await self.service.descargar('7', 10)
+
     async def test_unknown_transcription_engine(self):
         with self.assertRaises(ValueError):
             await self.service.transcribir('7', 10, motor='external')

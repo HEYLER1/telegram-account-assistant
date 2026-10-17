@@ -2,6 +2,8 @@
 import asyncio
 from datetime import datetime, timezone, timedelta
 import json
+import hashlib
+import re
 from pathlib import Path
 import secrets
 import zipfile
@@ -312,30 +314,46 @@ class Features(SearchService):
                     'peer': utils.get_peer_id(last.peer), 'date': top.date.isoformat()})
         return {'origins': results, 'next_cursor': next_cursor}
 
-    async def descargar(self, chat, mensaje_id, max_mb=25):
+    async def descargar(self, chat, mensaje_id, max_mb=25, categoria=None):
         positive(mensaje_id)
-        if not isinstance(max_mb, int) or not 1 <= max_mb <= 100:
+        if isinstance(max_mb, bool) or not isinstance(max_mb, int) or not 1 <= max_mb <= 100:
             raise ValueError('max_mb debe estar entre 1 y 100.')
+        if categoria is not None and (not isinstance(categoria, str) or
+                not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,63}', categoria)):
+            raise ValueError('categoria debe tener entre 1 y 64 letras, números, guiones o guiones bajos.')
         message = await self.client.get_messages(peer(chat), ids=mensaje_id)
         if not message or not message.media or not message.file:
             raise ValueError('El mensaje no contiene un archivo descargable.')
         if message.file.size is None or message.file.size > max_mb * 1024 * 1024:
             raise ValueError('Archivo sin tamaño conocido o superior al límite de descarga.')
         directory = self.store.directory / 'downloads'
-        directory.mkdir(exist_ok=True, mode=0o700)
+        if categoria:
+            directory = directory / categoria
+        if not directory.resolve().is_relative_to(self.store.directory.resolve()):
+            raise ValueError('El destino de descarga queda fuera del almacenamiento local.')
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         # Never trust a Telegram filename as a filesystem path.
         extension = message.file.ext or '.bin'
         if not extension.startswith('.') or not extension[1:].isalnum() or len(extension) > 12:
             extension = '.bin'
-        path = directory / (secrets.token_hex(12) + extension)
-        path.touch(mode=0o600)
+        original = (message.file.name or 'archivo').replace('\\', '/').rsplit('/', 1)[-1]
+        stem = re.sub(r'[^\w .()-]', '_', Path(original).stem).strip(' .')[:100] or 'archivo'
+        path = directory / (secrets.token_hex(12) + '.part')
+        path.touch(mode=0o600, exist_ok=False)
         try:
             result = await self.client.download_media(message, file=str(path))
             if not result:
                 raise ValueError('Telegram no devolvió un archivo.')
             if path.stat().st_size > max_mb * 1024 * 1024:
                 raise ValueError('El archivo descargado supera el límite.')
-            return {'path': str(path), 'message': message_data(message)}
+            if path.stat().st_size != message.file.size:
+                raise ValueError('Descarga incompleta: el tamaño no coincide con Telegram.')
+            with path.open('rb') as stream:
+                digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+            final = directory / (stem + '-' + secrets.token_hex(6) + extension)
+            path.rename(final)
+            return {'path': str(final), 'message': message_data(message),
+                    'size_bytes': final.stat().st_size, 'sha256': digest, 'categoria': categoria}
         except BaseException:
             path.unlink(missing_ok=True)
             raise
