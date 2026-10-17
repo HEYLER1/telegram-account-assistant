@@ -12,6 +12,7 @@ from xml.etree import ElementTree
 from telethon import functions, types, utils
 from .service import SearchService, bounded_limit, message_data, peer
 from .helpers import date_value, positive, parse_link
+from .relevance import terms, relevance
 
 FILTERS = {'todos': types.InputMessagesFilterEmpty, 'pdf': types.InputMessagesFilterDocument,
            'documentos': types.InputMessagesFilterDocument, 'fotos': types.InputMessagesFilterPhotos,
@@ -35,6 +36,60 @@ class Features(SearchService):
 
     def _next(self, kind, signature, offset):
         return self.store.token(kind, {'signature': signature, 'offset': offset})
+
+    async def buscar_relevante(self, consulta, chats=None, alternativas=None,
+                              tipo_archivo='todos', limite=20, paginas=2):
+        """Bounded searches over explicit scopes; rank only lexical matches."""
+        bounded_limit(limite)
+        if isinstance(paginas, bool) or not isinstance(paginas, int) or not 1 <= paginas <= 5:
+            raise ValueError('paginas debe estar entre 1 y 5.')
+        if not terms(consulta):
+            raise ValueError('Indica palabras relevantes para buscar.')
+        if chats is not None and (not chats or len(chats) > 5):
+            raise ValueError('chats admite entre 1 y 5 IDs o usuarios; omítelo para búsqueda global.')
+        if alternativas is not None and (len(alternativas) > 3 or any(not terms(q) for q in alternativas)):
+            raise ValueError('alternativas admite hasta 3 consultas con palabras relevantes.')
+        if tipo_archivo not in FILTERS:
+            raise ValueError('Tipo de archivo desconocido.')
+        scopes = list(dict.fromkeys(chats)) if chats else [None]
+        queries = list(dict.fromkeys([consulta] + (alternativas or [])))
+        # One connection, at most three in-flight requests. A broad query is
+        # narrowed locally using every significant word, including filenames.
+        semaphore = asyncio.Semaphore(3)
+        async def search_scope(chat, query):
+            anchor = max(terms(query), key=len)
+            cursor = None
+            found, scanned, requests = [], 0, 0
+            for _ in range(paginas):
+                async with semaphore:
+                    page = await self.buscar(anchor, chat=chat, tipo_archivo=tipo_archivo,
+                                             cursor=cursor, limite=100)
+                requests += 1
+                scanned += page['scanned']
+                found.extend(page['messages'])
+                cursor = page['next_cursor']
+                if not cursor:
+                    break
+            return found, scanned, requests, {'consulta': anchor, 'chat': chat,
+                'tipo_archivo': tipo_archivo, 'cursor': cursor, 'limite': 100} if cursor else None
+        results = await asyncio.gather(*(search_scope(c, q) for c in scopes for q in queries))
+        unique = {}
+        continuations = []
+        for messages, _, _, continuation in results:
+            if continuation:
+                continuations.append(continuation)
+            for message in messages:
+                score, matched = relevance(message, queries)
+                if score:
+                    data = dict(message, relevance_score=score, matched_terms=matched)
+                    key = (message['chat_id'], message['id'])
+                    if key not in unique or score > unique[key]['relevance_score']:
+                        unique[key] = data
+        ordered = sorted(unique.values(), key=lambda m: (m['relevance_score'], m.get('date') or ''), reverse=True)
+        return {'messages': ordered[:limite], 'matched': len(ordered),
+                'scanned': sum(r[1] for r in results), 'requests': sum(r[2] for r in results),
+                'continuations': continuations, 'omitted_matches': max(0, len(ordered)-limite),
+                'coverage': 'Búsqueda léxica acotada, no semántica ni exhaustiva. Coinciden todas las palabras significativas de al menos una consulta en texto o nombre de archivo. Las alternativas son explícitas. Para continuar usa buscar con cada objeto de continuations.'}
 
     def _messages(self, response, entity=None):
         entities = {utils.get_peer_id(x): x for x in [*response.users, *response.chats]}

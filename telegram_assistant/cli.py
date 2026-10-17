@@ -32,6 +32,10 @@ def main():
     search = commands.add_parser('search')
     search.add_argument('query')
     search.add_argument('--chat')
+    search.add_argument('--modo', choices=['relevante', 'telegram'], default='relevante')
+    search.add_argument('--tipo-archivo', default='todos')
+    search.add_argument('--alternativa', action='append', default=[])
+    search.add_argument('--paginas', type=int, default=2)
     history = commands.add_parser('history')
     history.add_argument('chat')
     history.add_argument('--before-id', type=int, default=0)
@@ -42,11 +46,17 @@ def main():
         if args.command == 'serve':
             from .server import mcp
             mcp.run(transport='stdio')
-        elif args.command == 'tool':
+        elif args.command == 'tool' or (args.command == 'search' and args.modo == 'relevante'):
             from .gateway import Gateway
             gateway = Gateway()
             try:
-                result = asyncio.run(gateway.call(args.action, json.loads(args.params), args.budget))
+                if args.command == 'search':
+                    result = asyncio.run(gateway.call('buscar_relevante', {
+                        'consulta': args.query, 'chats': [args.chat] if args.chat else None,
+                        'alternativas': args.alternativa, 'tipo_archivo': args.tipo_archivo,
+                        'limite': args.limit, 'paginas': args.paginas}))
+                else:
+                    result = asyncio.run(gateway.call(args.action, json.loads(args.params), args.budget))
                 print(json.dumps(result, ensure_ascii=False, indent=2))
                 if not result['ok']:
                     raise SystemExit(1)

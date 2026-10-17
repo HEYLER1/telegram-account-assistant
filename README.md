@@ -79,6 +79,46 @@ El servidor ofrece **exactamente una herramienta**, `telegram(accion, parametros
 
 ## Cómo funcionan las búsquedas
 
+### Resultados por relevancia
+
+`search` utiliza ahora `buscar_relevante` por defecto. Filtra coincidencias que
+no contengan todas las palabras significativas de la consulta, ignora acentos
+y mayúsculas, consulta también nombres de archivos y prioriza coincidencias
+de frase y de nombre de archivo. Elimina mensajes repetidos por chat e ID.
+No utiliza embeddings ni interpreta automáticamente lenguaje natural o sinónimos.
+Una consulta breve y específica funciona mejor que una petición conversacional.
+
+```sh
+telegram-asistente search 'redes de datos' --tipo-archivo pdf --alternativa 'computer networks' --limit 10
+telegram-asistente tool buscar_relevante --params '{"consulta":"robotica","chats":["@canal1","@canal2"],"paginas":2}'
+```
+
+Se consulta una palabra de cada variante en Telegram y se filtran los candidatos
+localmente. Por defecto se revisan hasta dos páginas de 100 candidatos por
+consulta y ámbito. `paginas` admite 1–5, `chats` hasta cinco chats y `alternativas`
+hasta tres variantes adicionales. Sin `chats` usa búsqueda global. Comparte una
+sola conexión y limita a tres solicitudes simultáneas. No hay reintentos automáticos
+ante límites de Telegram. La concurrencia reduce esperas cuando hay varios ámbitos;
+no garantiza menor latencia para una consulta individual.
+
+Devuelve `scanned`, `requests`, `matched`, `omitted_matches` y `continuations`.
+No encontrar coincidencias en esas páginas no demuestra que no existan. Para
+ampliar cobertura, pasa cada objeto de `continuations` a `buscar` (resultados
+sin el filtro local de relevancia), o aumenta `paginas`. El límite final puede
+omitir coincidencias que sí fueron examinadas; se informa en `omitted_matches`.
+Un mensaje sin texto ni nombre de archivo no puede evaluarse léxicamente.
+
+`search --modo telegram` conserva la búsqueda antigua y su formato de respuesta.
+El modo predeterminado devuelve el sobre `ok/result` de la herramienta unificada.
+Las pruebas automatizadas cubren falsos positivos, acentos, nombres de archivo,
+alternativas, deduplicación, orden, presupuesto de consultas y continuación.
+
+Verificación del 16 de octubre de 2026: 45 pruebas automatizadas aprobadas y
+una consulta real de `redes de datos` con filtro PDF, una página y límite cinco.
+Telegram devolvió 80 candidatos y el filtro conservó dos mensajes con el título
+solicitado. Esta comprobación confirma el recorrido real; no es una medición
+de precisión global ni una comparación de tiempos con la versión anterior.
+
 - `buscar` acepta `consulta`, `chat`, `desde`, `hasta`, `remitente`, `tipo_archivo`, `tema_id`, `origen_guardado`, `etiqueta`, `cursor` y `limite`.
 - Medios disponibles: `todos`, `pdf`, `documentos`, `fotos`, `videos`, `audios`, `voz`, `enlaces` y `fijados`. Sin consulta textual hace falta un filtro de medio.
 - Fechas ISO 8601, `hoy`, `ayer` y `esta_semana`. Fechas sin zona usan **America/Lima**. `desde` incluye el instante inicial; `hasta` lo excluye. Para buscar todo ayer usa desde=ayer y hasta=hoy.

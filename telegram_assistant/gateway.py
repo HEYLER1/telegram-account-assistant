@@ -12,6 +12,7 @@ from .service import ROOT, connection
 from .storage import Store
 
 ACTIONS = {
+    'buscar_relevante': 'Búsqueda acotada por relevancia en texto y nombres de archivo; varios chats y alternativas explícitas.',
     'buscar': 'Búsqueda textual con fechas, remitente, medios, tema y cursor.',
     'chats_avanzados': 'Encuentra chats por nombre/usuario, tipo, archivo y carpeta; cursor de continuación.',
     'mensaje': 'Recupera un mensaje exacto sin truncado previo.',
@@ -50,6 +51,7 @@ TYPES = {
     'motor': str, 'modelo': str, 'idioma': str, 'trabajo_id': str, 'formato': str,
     'operacion': str, 'texto': str, 'fecha': str, 'titulo': str, 'chats': list[str],
     'comprobante': str, 'autorizado': bool, 'categoria': str,
+    'alternativas': list[str], 'paginas': int,
 }
 
 

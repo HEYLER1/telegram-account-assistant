@@ -104,6 +104,40 @@ class FeatureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.offset_id, 9)
         self.assertEqual(request.offset_peer.channel_id, 123)
 
+    async def test_relevant_search_ranks_deduplicates_and_limits_requests(self):
+        from unittest.mock import AsyncMock
+        pages = [
+            {'messages': [{'id': 1, 'chat_id': 7, 'text': 'Redes sociales'},
+                          {'id': 2, 'chat_id': 7, 'text': 'Redes de datos'}],
+             'scanned': 2, 'next_cursor': 'next'},
+            {'messages': [{'id': 2, 'chat_id': 7, 'text': 'Redes de datos'},
+                          {'id': 3, 'chat_id': 7, 'text': '', 'file': {'name': 'Redes de datos.pdf'}}],
+             'scanned': 2, 'next_cursor': None}]
+        with patch.object(self.service, 'buscar', new=AsyncMock(side_effect=pages)) as search:
+            result = await self.service.buscar_relevante('redes de datos', paginas=2)
+        self.assertEqual([m['id'] for m in result['messages']], [3, 2])
+        self.assertEqual(result['requests'], 2)
+        self.assertEqual(result['scanned'], 4)
+        self.assertEqual(result['continuations'], [])
+        self.assertEqual(search.call_args_list[1].kwargs['cursor'], 'next')
+
+    async def test_relevant_search_scope_and_continuation(self):
+        from unittest.mock import AsyncMock
+        page = {'messages': [], 'scanned': 100, 'next_cursor': 'more'}
+        with patch.object(self.service, 'buscar', new=AsyncMock(return_value=page)) as search:
+            result = await self.service.buscar_relevante('robotica', chats=['7', '8', '7'], paginas=1)
+        self.assertEqual(search.await_count, 2)
+        self.assertEqual(len(result['continuations']), 2)
+        self.assertEqual(result['continuations'][0]['chat'], '7')
+
+    async def test_relevant_search_invalid_budget_does_not_query(self):
+        from unittest.mock import AsyncMock
+        with patch.object(self.service, 'buscar', new=AsyncMock()) as search:
+            for params in [{'paginas': 0}, {'paginas': 6}, {'chats': []}, {'alternativas': ['de la']}]:
+                with self.assertRaises(ValueError):
+                    await self.service.buscar_relevante('redes', **params)
+            search.assert_not_awaited()
+
     async def test_cursor_rejects_different_query(self):
         first = await self.service.buscar('Contrato')
         with self.assertRaises(ValueError):
